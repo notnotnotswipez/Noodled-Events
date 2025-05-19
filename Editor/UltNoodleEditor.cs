@@ -202,11 +202,14 @@ public class UltNoodleEditor : EditorWindow
             this.OnFocus(); // update displays
         });
         root.Q("GroupPath").Insert(1, selectedOnlyTog);
+		
+		bool empty = false;
+		
+		if (AllNodeDefs.Count == 0){
+			empty = true;
+		}
 
-
-
-        AllNodeDefs.Clear();
-        var cookBooks = AssetDatabase.FindAssets("t:" + nameof(CookBook)).Select(guid => AssetDatabase.LoadAssetAtPath<CookBook>(AssetDatabase.GUIDToAssetPath(guid)));
+        var cookBooks = AssetDatabase.FindAssets("t:" + nameof(CookBook), new string[] { "Packages" }).Select(guid => AssetDatabase.LoadAssetAtPath<CookBook>(AssetDatabase.GUIDToAssetPath(guid)));
         if (!cookBooks.Contains(CommonsCookBook)) cookBooks = cookBooks.Append(CommonsCookBook);
         if (!cookBooks.Contains(StaticCookBook)) cookBooks = cookBooks.Append(StaticCookBook);
         if (!cookBooks.Contains(ObjectCookBook)) cookBooks = cookBooks.Append(ObjectCookBook);
@@ -220,7 +223,10 @@ public class UltNoodleEditor : EditorWindow
             CookBook book = sdenhr; //lol (this is like this for a reason trust me)
             cur++;
             EditorUtility.DisplayProgressBar("Loading Noodle Editor...", book.name, (float)cur/final);
-            book.CollectDefs(AllNodeDefs);
+			
+			if (empty){
+				book.CollectDefs(AllNodeDefs);
+			}
 
             //also search toggle
             var tog = new Toggle(book.name) { value = true };
@@ -236,7 +242,7 @@ public class UltNoodleEditor : EditorWindow
 
         AllBooks = cookBooks.ToArray();
     }
-    Dictionary<CookBook, bool> BookFilters = new Dictionary<CookBook, bool>();
+    static Dictionary<CookBook, bool> BookFilters = new Dictionary<CookBook, bool>();
     private bool _created = false;
     private bool _currentlyZooming;
     private float _zoom = 1;
@@ -640,7 +646,7 @@ public class UltNoodleEditor : EditorWindow
     }
 
     
-    List<CookBook.NodeDef> AllNodeDefs = new();
+    static List<CookBook.NodeDef> AllNodeDefs = new();
     List<CookBook.NodeDef> FilteredNodeDefs = new();
 
     /*
