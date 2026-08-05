@@ -7,20 +7,37 @@ using System.Reflection;
 using TMPro;
 using UltEvents;
 using UnityEngine;
+using UnityEngine.UIElements;
 using static NoodledEvents.CookBook.NodeDef;
 
 
 public class CommonsCookBook : CookBook
 {
-    public override void CollectDefs(List<NodeDef> allDefs)
+    public override void CollectDefs(Action<IEnumerable<NodeDef>, float> progressCallback, Action completedCallback)
     {
+        List<NodeDef> allDefs = new();
+
+        #region FLOW
         // flow.if
-        allDefs.Add(new NodeDef(this, "flow.if", 
-            inputs:() => new[] { new Pin("Exec"), new Pin("condition", typeof(bool)) },
-            outputs:() => new[] { new Pin("true"), new Pin("false") },
+        allDefs.Add(new NodeDef(this, "flow.if",
+            inputs: () => new[] { new Pin("Exec"), new Pin("condition", typeof(bool)) },
+            outputs: () => new[] { new Pin("true"), new Pin("false") },
             bookTag: "if"));
 
-        #region MATH
+        // flow.redirect
+        allDefs.Add(new NodeDef(this, "flow.redirect",
+            inputs: () => new[] { new Pin("") },
+            outputs: () => new[] { new Pin("") },
+            bookTag: "flow_redirect"));
+
+        // data.redirect
+        allDefs.Add(new NodeDef(this, "data.redirect",
+            inputs: () => new[] { new Pin("", typeof(object)) },
+            outputs: () => new[] { new Pin("", typeof(object)) },
+            bookTag: "data_redirect"));
+        #endregion
+
+        #region FLOAT MATH
         allDefs.Add(new NodeDef(this, "math.add_floats",
             inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(float)), new Pin("b", typeof(float)) },
             outputs: () => new[] { new Pin("done"), new Pin("a+b", typeof(float)) },
@@ -41,15 +58,47 @@ public class CommonsCookBook : CookBook
             outputs: () => new[] { new Pin("done"), new Pin("a/b", typeof(float)) },
             bookTag: "div_floats"));
 
-        allDefs.Add(new NodeDef(this, "math.greater",
+        allDefs.Add(new NodeDef(this, "math.greater_floats",
             inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(float)), new Pin("b", typeof(float)) },
             outputs: () => new[] { new Pin("done"), new Pin("a > b", typeof(bool)) },
             bookTag: "greater"));
 
-        allDefs.Add(new NodeDef(this, "math.lesser",
+        allDefs.Add(new NodeDef(this, "math.lesser_floats",
             inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(float)), new Pin("b", typeof(float)) },
             outputs: () => new[] { new Pin("done"), new Pin("a < b", typeof(bool)) },
             bookTag: "lesser"));
+        #endregion
+
+        #region INT MATH
+        allDefs.Add(new NodeDef(this, "math.add_ints",
+            inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(int)), new Pin("b", typeof(int)) },
+            outputs: () => new[] { new Pin("done"), new Pin("a+b", typeof(int)) },
+            bookTag: "add_ints"));
+
+        allDefs.Add(new NodeDef(this, "math.sub_ints",
+            inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(int)), new Pin("b", typeof(int)) },
+            outputs: () => new[] { new Pin("done"), new Pin("a-b", typeof(int)) },
+            bookTag: "sub_ints"));
+
+        allDefs.Add(new NodeDef(this, "math.mul_ints",
+            inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(int)), new Pin("b", typeof(int)) },
+            outputs: () => new[] { new Pin("done"), new Pin("a*b", typeof(int)) },
+            bookTag: "mul_ints"));
+
+        allDefs.Add(new NodeDef(this, "math.div_ints",
+            inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(int)), new Pin("b", typeof(int)) },
+            outputs: () => new[] { new Pin("done"), new Pin("a/b", typeof(int)) },
+            bookTag: "div_ints"));
+
+        allDefs.Add(new NodeDef(this, "math.greater_ints",
+            inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(int)), new Pin("b", typeof(int)) },
+            outputs: () => new[] { new Pin("done"), new Pin("a > b", typeof(bool)) },
+            bookTag: "greater_ints"));
+
+        allDefs.Add(new NodeDef(this, "math.lesser_ints",
+            inputs: () => new[] { new Pin("Exec"), new Pin("a", typeof(int)), new Pin("b", typeof(int)) },
+            outputs: () => new[] { new Pin("done"), new Pin("a < b", typeof(bool)) },
+            bookTag: "lesser_ints"));
         #endregion
 
         #region VARIABLES
@@ -62,50 +111,115 @@ public class CommonsCookBook : CookBook
 
         // vars.set_bowl_float_var
         allDefs.Add(new NodeDef(this, "vars.get_bowl_float_var", // Is this supposed to be SET? Book tag says Get
-                inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const:true) },
+                inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true) },
                 outputs: () => new[] { new Pin("done"), new Pin("value", typeof(float)) },
                 bookTag: "get_bowl_float_var"));
 
         foreach (var storager in PendingConnection.CompStoragers)
         {
+            string typeName = storager.Key == typeof(object) ? "SystemObject" : storager.Key.GetFriendlyName();
+
             // scene storagers
-            allDefs.Add(new NodeDef(this, $"vars.set_scene_{storager.Key.GetFriendlyName()}_var",
+            allDefs.Add(new NodeDef(this, $"vars.set_scene_{typeName}_var",
                 inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("value", storager.Key) },
                 outputs: () => new[] { new Pin("done") },
-                bookTag: $"set_scene_{storager.Key.GetFriendlyName()}_var"));
-            allDefs.Add(new NodeDef(this, $"vars.get_scene_{storager.Key.GetFriendlyName()}_var",
+                bookTag: $"set_scene_{typeName}_var"));
+            allDefs.Add(new NodeDef(this, $"vars.get_scene_{typeName}_var",
                 inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true) },
                 outputs: () => new[] { new Pin("done"), new Pin("value", storager.Key) },
-                bookTag: $"get_scene_{storager.Key.GetFriendlyName()}_var"));
-            allDefs.Add(new NodeDef(this, $"vars.get_or_init_scene_{storager.Key.GetFriendlyName()}_var",
-                inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("default/init value", storager.Key, @const: true) },
-                outputs: () => new[] { new Pin("done"), new Pin("value", storager.Key) },
-                bookTag: $"get_or_init_scene_{storager.Key.GetFriendlyName()}_var"));
+                bookTag: $"get_scene_{typeName}_var"));
+            if (storager.Key != typeof(object))
+                allDefs.Add(new NodeDef(this, $"vars.get_or_init_scene_{typeName}_var",
+                    inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("default/init value", storager.Key, @const: true) },
+                    outputs: () => new[] { new Pin("done"), new Pin("value", storager.Key) },
+                    bookTag: $"get_or_init_scene_{typeName}_var"));
             // gobj storagers
-            allDefs.Add(new NodeDef(this, $"vars.set_gobj_{storager.Key.GetFriendlyName()}_var",
+            allDefs.Add(new NodeDef(this, $"vars.set_gobj_{typeName}_var",
                 inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("value", storager.Key), new Pin("gobj", typeof(GameObject), true) },
                 outputs: () => new[] { new Pin("done") },
-                bookTag: $"set_gobj_{storager.Key.GetFriendlyName()}_var"));
-            allDefs.Add(new NodeDef(this, $"vars.get_gobj_{storager.Key.GetFriendlyName()}_var",
+                bookTag: $"set_gobj_{typeName}_var"));
+            allDefs.Add(new NodeDef(this, $"vars.get_gobj_{typeName}_var",
                 inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("gobj", typeof(GameObject), true) },
                 outputs: () => new[] { new Pin("done"), new Pin("value", storager.Key) },
-                bookTag: $"get_gobj_{storager.Key.GetFriendlyName()}_var"));
-            allDefs.Add(new NodeDef(this, $"vars.get_or_init_gobj_{storager.Key.GetFriendlyName()}_var",
-                inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("gobj", typeof(GameObject), true), new Pin("default/init value", storager.Key, @const: true) },
-                outputs: () => new[] { new Pin("done"), new Pin("value", storager.Key) },
-                bookTag: $"get_or_init_gobj_{storager.Key.GetFriendlyName()}_var"));
+                bookTag: $"get_gobj_{typeName}_var"));
+
+            if (storager.Key != typeof(object))
+                allDefs.Add(new NodeDef(this, $"vars.get_or_init_gobj_{typeName}_var",
+                    inputs: () => new[] { new Pin("Exec"), new Pin("name", typeof(string), @const: true), new Pin("gobj", typeof(GameObject), true), new Pin("default/init value", storager.Key, @const: true) },
+                    outputs: () => new[] { new Pin("done"), new Pin("value", storager.Key) },
+                    bookTag: $"get_or_init_gobj_{typeName}_var"));
         }
+
+        // Global Sys.Object vars
+        allDefs.Add(new NodeDef(this, "vars.set_global_SystemObject_var",
+            inputs: () => new[] { new Pin("Exec"), new Pin("Var Name", typeof(string), @const: true), new Pin("System.Object", typeof(object)) },
+            outputs: () => new[] { new Pin("done") },
+            bookTag: "set_global_SystemObject_var"
+            ));
+        allDefs.Add(new NodeDef(this, "vars.get_global_SystemObject_var",
+                inputs: () => new[] { new Pin("Exec"), new Pin("Var Name", typeof(string), @const: true) },
+                outputs: () => new[] { new Pin("done"), new Pin("System.Object", typeof(object)) },
+                bookTag: "get_global_SystemObject_var"));
+
+        // Saved Sys.String vars
+        allDefs.Add(new NodeDef(this, "vars.set_saved_string_var",
+            inputs: () => new[] { new Pin("Exec"), new Pin("Var Name", typeof(string), @const: true), new Pin("save data", typeof(string)) },
+            outputs: () => new[] { new Pin("done") },
+            bookTag: "set_saved_string_var"
+            ));
+        allDefs.Add(new NodeDef(this, "vars.get_saved_string_var",
+                inputs: () => new[] { new Pin("Exec"), new Pin("Var Name", typeof(string), @const: true) },
+                outputs: () => new[] { new Pin("done"), new Pin("save data", typeof(string)) },
+                bookTag: "get_saved_string_var"));
         #endregion
 
-        // Async
+        #region ASYNC
+        // Async doesnt really need its own region but it looks cleaner if every catagory has a region
         allDefs.Add(new NodeDef(this, "async.Wait",
             inputs: () => new[] { new Pin("Start"), new Pin("seconds", typeof(float)),
             new Pin("embedded", typeof(bool), true)},
             outputs: () => new[] { new Pin("On Started"), new Pin("After \"seconds\"") },
             bookTag: "wait"));
+        #endregion
+
+        #region DELEGATES
+        allDefs.Add(new NodeDef(this, "delegates.Create",
+            inputs: () => new[] { new Pin("Create") },
+            outputs: () => new[] { new Pin("On Created"), new Pin("DelegateID", typeof(string)), new Pin("Delegate", typeof(Delegate)), new Pin("On Triggered") },
+            bookTag: "delegate0"));
+        for (int i = 1; i < 5; i++)
+        {
+            List<Pin> outs = new();
+            outs.AddRange(new[] { new Pin("On Created"), new Pin("DelegateID", typeof(string)), new Pin("Delegate", typeof(Delegate)), new Pin("On Triggered") });
+            for (int i2 = 1; i2 <= i; i2++)
+                outs.Add(new Pin($"Parameter {i2}", typeof(object)));
+
+            List<Pin> ins = new() { new Pin("Create") };
+            for (int i2 = 1; i2 <= i; i2++)
+                ins.Add(new Pin($"Param Type {i2}", typeof(Type), true));
+
+            allDefs.Add(new NodeDef(this, $"delegates.Create_with_{i}_parameter",
+                inputs: ins.ToArray,
+                outputs: outs.ToArray,
+                bookTag: $"delegate{i}"));
+
+        }
+        allDefs.Add(new NodeDef(this, "delegates.Fetch",
+            inputs: () => new[] { new Pin("Fetch"), new Pin("DelegateID", typeof(string)) },
+            outputs: () => new[] { new Pin("Fetched"), new Pin("Delegate", typeof(Delegate)) },
+            bookTag: "fetch_delegate"));
+        #endregion
+
+        progressCallback.Invoke(allDefs, 1);
+        completedCallback.Invoke();
     }
+
+    public const string dictStoreTypeStr = "UnityEngine.Rendering.LensFlareCommonSRP, Unity.RenderPipelines.Core.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null";
+    public const string dictStoreFieldStr = "m_Padlock";
     public override void CompileNode(UltEventBase evt, SerializedNode node, Transform dataRoot)
     {
+        base.CompileNode(evt, node, dataRoot);
+
         void SetSceneVar(GameObject gobjRoot)
         {
             // Type Agnostic set var code
@@ -125,7 +239,7 @@ public class CommonsCookBook : CookBook
                     storagerData.Item2.SetValue(tempVarRef, Activator.CreateInstance(storagerData.Item2.PropertyType));
                 else storagerData.Item2.SetValue(tempVarRef, null);
             }
-            
+
 
             var setCall = new PersistentCall(storagerData.Item2.SetMethod, tempVarRef);
             if (node.DataInputs[1].Source != null) new PendingConnection(node.DataInputs[1].Source, evt, setCall, 0).Connect(dataRoot); // retval
@@ -170,7 +284,8 @@ public class CommonsCookBook : CookBook
                 if (node.Name.StartsWith("vars.get_or_init_gobj_"))
                 {
                     storagerData.Item2.SetValue(tempVarRef, node.DataInputs[2].GetDefault());
-                } else
+                }
+                else
                 {
                     // get before init??? we have to use type defaults then :/
                     if (storagerData.Item2.PropertyType.IsValueType)
@@ -188,6 +303,45 @@ public class CommonsCookBook : CookBook
             if (nextNode != null)
                 nextNode.Book.CompileNode(evt, nextNode, dataRoot);
             return;
+        }
+        void math_ints_op(string op_name, Type outType)
+        {
+            var SqlInt32 = typeof(System.Data.SqlTypes.SqlInt32);
+            var SqlInt32Implicit = SqlInt32.GetMethod("op_Implicit", new Type[] { typeof(int) });
+            var SqlInt32Operation = SqlInt32.GetMethod(op_name);
+
+            var impCallA = new PersistentCall(SqlInt32Implicit, null);
+            if (node.DataInputs[0].Source != null) new PendingConnection(node.DataInputs[0].Source, evt, impCallA, 0).Connect(dataRoot);
+            else impCallA.PersistentArguments[0].Int = node.DataInputs[0].DefaultIntValue;
+            var impCallA_idx = evt.PersistentCallsList.Count;
+            evt.PersistentCallsList.Add(impCallA);
+
+            var impCallB = new PersistentCall(SqlInt32Implicit, null);
+            if (node.DataInputs[1].Source != null) new PendingConnection(node.DataInputs[1].Source, evt, impCallB, 0).Connect(dataRoot);
+            else impCallB.PersistentArguments[0].Int = node.DataInputs[1].DefaultIntValue;
+            var impCallB_idx = evt.PersistentCallsList.Count;
+            evt.PersistentCallsList.Add(impCallB);
+
+            var opCall = new PersistentCall(SqlInt32Operation, null);
+            opCall.PersistentArguments[0].ToRetVal(impCallA_idx, SqlInt32);
+            opCall.PersistentArguments[1].ToRetVal(impCallB_idx, SqlInt32);
+            var opCall_idx = evt.PersistentCallsList.Count;
+            evt.PersistentCallsList.Add(opCall);
+
+            // string.Concat(object arg0) is stripped, using string.Concat(object arg0, object arg1)
+            var stringConcatCall = new PersistentCall(typeof(string).GetMethod("Concat", new Type[] { typeof(object), typeof(object) }), null);
+            stringConcatCall.PersistentArguments[0].ToRetVal(opCall_idx, typeof(object));
+            stringConcatCall.PersistentArguments[1].ToObjVal(null, typeof(object)); // check if generates valid ult
+            var concatCall_idx = evt.PersistentCallsList.Count;
+            evt.PersistentCallsList.Add(stringConcatCall);
+
+            var intConvertCall = new PersistentCall(outType.GetMethod("Parse", new Type[] { typeof(string) }), null);
+            intConvertCall.PersistentArguments[0].ToRetVal(concatCall_idx, typeof(string));
+            var intConvertCall_idx = evt.PersistentCallsList.Count;
+            evt.PersistentCallsList.Add(intConvertCall);
+
+            node.DataOutputs[0].CompEvt = evt;
+            node.DataOutputs[0].CompCall = intConvertCall;
         }
         switch (node.BookTag)
         {
@@ -234,8 +388,9 @@ public class CommonsCookBook : CookBook
                     // embedded mode:
                     if (node.DataInputs.Length == 2 && node.DataInputs[1].DefaultBoolValue)
                     {
-                        // is embedded
-                        var asyncEvt = dataRoot.StoreComp<DelayedUltEventHolder>("Embedded Async Event");
+                        // is embedded - place at root
+
+                        var asyncEvt = node.Bowl.LastGenerated.transform.StoreComp<DelayedUltEventHolder>("Embedded Async Event");
                         asyncEvt.gameObject.SetActive(true);
 
                         if (node.DataInputs[0].Source == null) asyncEvt.Delay = node.DataInputs[0].DefaultFloatValue;
@@ -256,7 +411,7 @@ public class CommonsCookBook : CookBook
                     Transform ats = dataRoot.Find("async templates");
                     if (!ats) ats = dataRoot.StoreTransform("async templates");
 
-                    
+
                     // okay so like this is supposed to be async
                     // new, copied on run dataroot:
                     var slowDataRoot = ats.StoreComp<LifeCycleEvents>("Async DataRoot");
@@ -274,7 +429,7 @@ public class CommonsCookBook : CookBook
 
                     // okay now we just need to insert cloning pcalls to original evt!
                     // since PendingConnection naturally put compstoragers under slowDataRoot.transform :3
-                    
+
                     // delay pin in functionality
                     if (node.DataInputs[0].Source == null) delayedEvt.Delay = node.DataInputs[0].DefaultFloatValue;
                     else
@@ -322,7 +477,7 @@ public class CommonsCookBook : CookBook
                 onFalse.EnableEvent.EnsurePCallList();
                 onFalse.gameObject.AddComponent<LifeCycleEvtEditorRunner>();
 
-                
+
                 if (node.DataInputs[0].Source != null) // condition varies
                 {
                     var rs1 = new PersistentCall(SetActive, onTrue.gameObject);  // reset onTrue
@@ -332,17 +487,18 @@ public class CommonsCookBook : CookBook
                     rs2.FSetArguments(new PersistentArgument(typeof(bool)));
                     evt.PersistentCallsList.Add(rs2);
 
-                    int conditionSource = evt.PersistentCallsList.IndexOf(node.DataInputs[0].Source.CompCall);
+                    var conditionSource = node.DataInputs[0].Source;
 
                     //pcall for setting the "true" state
                     var truCall = new PersistentCall(SetActive, onTrue.gameObject);
-                    truCall.FSetArguments(new PersistentArgument().ToRetVal(conditionSource, typeof(bool)));
+                    new PendingConnection(conditionSource, evt, truCall, 0).Connect(dataRoot);
                     evt.PersistentCallsList.Add(truCall);
 
                     //pcall to invert the state for the falser
                     var invCall = new PersistentCall();
                     invCall.FSetMethodName("System.Object, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089.Equals");
-                    invCall.FSetArguments(new PersistentArgument().ToRetVal(conditionSource, typeof(bool)), new PersistentArgument(typeof(bool)));
+                    invCall.FSetArguments(new PersistentArgument(typeof(object)), new PersistentArgument(typeof(bool)));
+                    new PendingConnection(conditionSource, evt, invCall, 0).Connect(dataRoot);
                     evt.PersistentCallsList.Add(invCall);
 
                     //pcall for setting the "false" state
@@ -375,29 +531,25 @@ public class CommonsCookBook : CookBook
                     makeA.PersistentArguments[0].Vector3 = new Vector3(0, 1, 0);
                     if (node.DataInputs[0].Source != null) new PendingConnection(node.DataInputs[0].Source, evt, makeA, 1).Connect(dataRoot);
                     else makeA.PersistentArguments[1].Float = node.DataInputs[0].DefaultFloatValue;
+                    var makeAidx = evt.PersistentCallsList.Count;
                     evt.PersistentCallsList.Add(makeA);
 
                     var makeB = new PersistentCall(v3Mult, null);
                     makeB.PersistentArguments[0].Vector3 = new Vector3(0, 1, 0);
                     if (node.DataInputs[1].Source != null) new PendingConnection(node.DataInputs[1].Source, evt, makeB, 1).Connect(dataRoot);
                     else makeB.PersistentArguments[1].Float = node.DataInputs[1].DefaultFloatValue;
+                    var makeBidx = evt.PersistentCallsList.Count;
                     evt.PersistentCallsList.Add(makeB);
 
                     MethodInfo v3Add = typeof(Vector3).GetMethod("op_Addition", UltEventUtils.AnyAccessBindings, null, new Type[] { typeof(Vector3), typeof(Vector3) }, null);
                     var subAB = new PersistentCall(v3Add, null);
-                    subAB.PersistentArguments[0].FSetType(PersistentArgumentType.ReturnValue);
-                    subAB.PersistentArguments[0].FSetString(typeof(Vector3).AssemblyQualifiedName);
-                    subAB.PersistentArguments[0].FSetInt(evt.PersistentCallsList.Count - 2);
-                    subAB.PersistentArguments[1].FSetString(typeof(Vector3).AssemblyQualifiedName);
-                    subAB.PersistentArguments[1].FSetType(PersistentArgumentType.ReturnValue);
-                    subAB.PersistentArguments[1].FSetInt(evt.PersistentCallsList.Count - 1);
+                    subAB.PersistentArguments[0].ToRetVal(makeAidx, typeof(Vector3));
+                    subAB.PersistentArguments[1].ToRetVal(makeBidx, typeof(Vector3));
                     evt.PersistentCallsList.Add(subAB);
 
                     // dot extract float
                     var dotter = new PersistentCall(typeof(Vector3).GetMethod("Dot"), null);
-                    dotter.PersistentArguments[0].FSetType(PersistentArgumentType.ReturnValue);
-                    dotter.PersistentArguments[0].FSetInt(evt.PersistentCallsList.Count - 1);
-                    dotter.PersistentArguments[0].FSetString(typeof(Vector3).AssemblyQualifiedName);
+                    dotter.PersistentArguments[0].ToRetVal(evt.PersistentCallsList.Count - 1, typeof(Vector3));
                     dotter.PersistentArguments[1].FSetType(PersistentArgumentType.Vector3);
                     dotter.PersistentArguments[1].Vector3 = Vector3.up;
                     evt.PersistentCallsList.Add(dotter);
@@ -481,18 +633,20 @@ public class CommonsCookBook : CookBook
                     makeA.PersistentArguments[0].Vector3 = new Vector3(0, 1, 0);
                     if (node.DataInputs[0].Source != null) new PendingConnection(node.DataInputs[0].Source, evt, makeA, 1).Connect(dataRoot);
                     else makeA.PersistentArguments[1].Float = node.DataInputs[0].DefaultFloatValue;
+                    var makeAidx = evt.PersistentCallsList.Count;
                     evt.PersistentCallsList.Add(makeA);
 
                     var makeB = new PersistentCall(v3Mult, null);
                     makeB.PersistentArguments[0].Vector3 = new Vector3(0, 1, 0);
                     if (node.DataInputs[1].Source != null) new PendingConnection(node.DataInputs[1].Source, evt, makeB, 1).Connect(dataRoot);
                     else makeB.PersistentArguments[1].Float = node.DataInputs[1].DefaultFloatValue;
+                    var makeBidx = evt.PersistentCallsList.Count;
                     evt.PersistentCallsList.Add(makeB);
 
                     MethodInfo v3Sub = typeof(Vector3).GetMethod("op_Subtraction", UltEventUtils.AnyAccessBindings, null, new Type[] { typeof(Vector3), typeof(Vector3) }, null);
                     var subAB = new PersistentCall(v3Sub, null);
-                    subAB.PersistentArguments[0].ToRetVal(evt.PersistentCallsList.Count-2, typeof(Vector3));
-                    subAB.PersistentArguments[1].ToRetVal(evt.PersistentCallsList.Count - 1, typeof(Vector3));
+                    subAB.PersistentArguments[0].ToRetVal(makeAidx, typeof(Vector3));
+                    subAB.PersistentArguments[1].ToRetVal(makeBidx, typeof(Vector3));
                     evt.PersistentCallsList.Add(subAB);
 
                     // dot extract float
@@ -514,7 +668,7 @@ public class CommonsCookBook : CookBook
                 {
                     // given a, b
                     // a > b?
-                    
+
                     var greater = new PersistentCall();
                     greater.FSetTarget(null);
                     greater.FSetMethodName("SLZ.Bonelab.VoidLogic.MathUtilities, Assembly-CSharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null.IsApproximatelyEqualToOrGreaterThan");
@@ -558,6 +712,61 @@ public class CommonsCookBook : CookBook
 
                     node.DataOutputs[0].CompEvt = evt;
                     node.DataOutputs[0].CompCall = lesser;
+
+                    var nextNode = node.FlowOutputs[0].Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+                    return;
+                }
+            case "add_ints":
+                {
+                    math_ints_op("op_Addition", typeof(int));
+
+                    var nextNode = node.FlowOutputs[0].Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+
+                    return;
+                }
+            case "sub_ints":
+                {
+                    math_ints_op("op_Subtraction", typeof(int));
+
+                    var nextNode = node.FlowOutputs[0].Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+                    return;
+                }
+            case "mul_ints":
+                {
+                    math_ints_op("op_Multiply", typeof(int));
+
+                    var nextNode = node.FlowOutputs[0].Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+                    return;
+                }
+            case "div_ints":
+                {
+                    math_ints_op("op_Division", typeof(int));
+
+                    var nextNode = node.FlowOutputs[0].Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+                    return;
+                }
+            case "greater_ints":
+                {
+                    math_ints_op("op_GreaterThan", typeof(bool));
+
+                    var nextNode = node.FlowOutputs[0].Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+                    return;
+                }
+            case "lesser_ints":
+                {
+                    math_ints_op("op_LessThan", typeof(bool));
 
                     var nextNode = node.FlowOutputs[0].Target?.Node;
                     if (nextNode != null)
@@ -618,18 +827,320 @@ public class CommonsCookBook : CookBook
                         nextNode.Book.CompileNode(evt, nextNode, dataRoot);
                     return;
                 }
+            case "fetch_delegate":
+                {
+                    // get dict
+                    int gotDict = evt.PersistentCallsList.AddGetDict();
+
+                    // for my sanity this is localized with a stupid format
+                    var getGuidStr2 = MakeCall<string>("Format", typeof(string), typeof(object));
+                    getGuidStr2.PersistentArguments[0].String = "{0}";
+                    if (node.DataInputs[0].Source != null) new PendingConnection(node.DataInputs[0].Source, evt, getGuidStr2, 1).Connect(dataRoot);
+                    else getGuidStr2.PersistentArguments[1].FSetType(PersistentArgumentType.String).FSetString(node.DataInputs[0].DefaultStringValue);
+                    evt.PersistentCallsList.Add(getGuidStr2);
+
+                    int gotValue = evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, object>).GetMethod("TryGetValue"),
+                            gotDict, evt.PersistentCallsList.IndexOf(getGuidStr2), null);
+
+                    int arrIdx = evt.PersistentCallsList.Count - 4;
+
+                    var arrGetIdx = typeof(Array).GetMethod("GetValue", new Type[] { typeof(int) });
+                    int getOut = evt.PersistentCallsList.AddRunMethod(arrGetIdx, arrIdx, new PersistentArgument(typeof(int)).FSetInt(1));
+
+                    node.DataOutputs[0].CompEvt = evt;
+                    node.DataOutputs[0].CompCall = evt.PersistentCallsList[getOut];
+
+                    var evtNext2 = node.FlowOutputs[0].Target?.Node;
+                    if (evtNext2 != null)
+                        evtNext2.Book.CompileNode(evt, evtNext2, dataRoot);
+                }
+                return;
+            case "set_global_SystemObject_var":
+                {
+                    // get dict
+                    evt.PersistentCallsList.AddEnsureDict(node);
+                    int gotDict = evt.PersistentCallsList.AddGetDict();
+
+                    MethodInfo setMethod = typeof(Dictionary<string, object>).GetMethod("set_Item", (BindingFlags)60);
+                    var nameArg = new PersistentArgument(typeof(string)); nameArg.String = node.DataInputs[0].DefaultStringValue;
+                    if (node.DataInputs[1].Source == null)
+                    {
+                        var constVal = node.DataInputs[1].GetDefault();
+                        var arg = new PersistentArgument(constVal.GetType());
+                        arg.Value = constVal;
+                        evt.PersistentCallsList.AddRunMethod(setMethod, gotDict, nameArg, arg);
+                    }
+                    else
+                    {
+                        if (node.DataInputs[1].Source.CompEvt != evt) throw new Exception("Can't transfer data for global vars! (todo)");
+                        if (node.DataInputs[1].Source.UseCompAsParam) throw new Exception("Can't use event params for global vars! (todo)");
+                        evt.PersistentCallsList.AddRunMethod(setMethod, gotDict, nameArg, evt.PersistentCallsList.IndexOf(node.DataInputs[1].Source.CompCall));
+                    }
+
+                    evt.PersistentCallsList.AddDebugLog(gotDict, true);
+
+                    // compile next node.
+                    var evtNext3 = node.FlowOutputs[0].Target?.Node;
+                    if (evtNext3 != null)
+                        evtNext3.Book.CompileNode(evt, evtNext3, dataRoot);
+                }
+                break;
+            case "get_global_SystemObject_var":
+                {
+                    // get dict
+                    evt.PersistentCallsList.AddEnsureDict(node);
+                    int gotDict = evt.PersistentCallsList.AddGetDict();
+
+                    MethodInfo getMethod = typeof(Dictionary<string, object>).GetMethod("get_Item", (BindingFlags)60);
+                    var nameArg = new PersistentArgument(typeof(string)); nameArg.String = node.DataInputs[0].DefaultStringValue;
+                    int gotValue = evt.PersistentCallsList.AddRunMethod(getMethod, gotDict, nameArg);
+
+                    node.DataOutputs[0].CompCall = evt.PersistentCallsList[gotValue];
+                    node.DataOutputs[0].CompEvt = evt;
+
+                    // compile next node.
+                    var evtNext3 = node.FlowOutputs[0].Target?.Node;
+                    if (evtNext3 != null)
+                        evtNext3.Book.CompileNode(evt, evtNext3, dataRoot);
+                }
+                break;
+            case "set_saved_string_var":
+                {
+                    // kys
+                    evt.PersistentCallsList.Add(MakeCall("SLZ.Bonelab.SaveData.DataManager, Assembly-CSharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null.get_ActiveSave"));
+                    int activeSave = evt.PersistentCallsList.Count - 1;
+                    int saveT = evt.PersistentCallsList.FindOrAddGetTyper("SLZ.Bonelab.SaveData.Save, Assembly-CSharp");
+                    int progT = evt.PersistentCallsList.FindOrAddGetTyper("SLZ.Bonelab.SaveData.PlayerProgression, Assembly-CSharp");
+                    int getProgMeth = evt.PersistentCallsList.FindOrAddGetMethodInfo(saveT, "get_Progression", new Type[] { }, new Type[] { }, progT);
+                    int progression = evt.PersistentCallsList.AddRunMethod(getProgMeth, activeSave);
+                    int dictT = evt.PersistentCallsList.FindOrAddGetTyper<Dictionary<string, Dictionary<string, System.Object>>>();
+                    int getLevelState = evt.PersistentCallsList.FindOrAddGetMethodInfo(progT, "get_LevelState", new Type[] { }, new Type[] { }, dictT);
+                    int levelState = evt.PersistentCallsList.AddRunMethod(getLevelState, progression);
+                    int savedDict = evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, Dictionary<string, System.Object>>).GetMethod("get_Item", (BindingFlags)60), levelState, new PersistentArgument(typeof(string)) { String = "G114" });
+                    // we now have the data dict
+
+                    if (node.DataInputs[1].Source == null)
+                        evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, System.Object>).GetMethod("set_Item"), savedDict, new PersistentArgument(typeof(string)) { String = node.DataInputs[0].DefaultStringValue }, new PersistentArgument(typeof(string)) { String = node.DataInputs[1].DefaultStringValue });
+                    else
+                    {
+                        if (node.DataInputs[1].Source.CompEvt != evt) throw new Exception("Can't transfer data for saved vars! (todo)");
+                        if (node.DataInputs[1].Source.UseCompAsParam) throw new Exception("Can't use event params for saved vars! (todo)");
+                        evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, System.Object>).GetMethod("set_Item"), savedDict, new PersistentArgument(typeof(string)) { String = node.DataInputs[0].DefaultStringValue }, evt.PersistentCallsList.IndexOf(node.DataInputs[1].Source.CompCall));
+                    }
+
+
+                    int saveFlag = evt.PersistentCallsList.FindOrAddGetTyper("SLZ.Marrow.SaveData.SaveFlags, SLZ.Marrow");
+
+                    var getEnum = MakeCall<Enum>("Parse", new Type[] { typeof(Type), typeof(string) });
+                    getEnum.PersistentArguments[0].ToRetVal(saveFlag, typeof(Type));
+                    getEnum.PersistentArguments[1].FSetType(PersistentArgumentType.String).FSetString("Complete");
+                    evt.PersistentCallsList.Add(getEnum);
+
+                    var saveIt = MakeCall("SLZ.Bonelab.SaveData.DataManager, Assembly-CSharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null.TrySaveActiveSave");
+                    saveIt.FSetArguments(new PersistentArgument().FSetType(PersistentArgumentType.ReturnValue).FSetInt(evt.PersistentCallsList.IndexOf(getEnum)).FSetString("SLZ.Marrow.SaveData.SaveFlags, SLZ.Marrow"));
+                    evt.PersistentCallsList.Add(saveIt);
+
+                    // compile next node.
+                    var evtNext3 = node.FlowOutputs[0].Target?.Node;
+                    if (evtNext3 != null)
+                        evtNext3.Book.CompileNode(evt, evtNext3, dataRoot);
+                }
+                break;
+            case "get_saved_string_var":
+                {
+                    // kys
+                    evt.PersistentCallsList.Add(MakeCall("SLZ.Bonelab.SaveData.DataManager, Assembly-CSharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null.get_ActiveSave"));
+                    int activeSave = evt.PersistentCallsList.Count - 1;
+                    int saveT = evt.PersistentCallsList.FindOrAddGetTyper("SLZ.Bonelab.SaveData.Save, Assembly-CSharp");
+                    int progT = evt.PersistentCallsList.FindOrAddGetTyper("SLZ.Bonelab.SaveData.PlayerProgression, Assembly-CSharp");
+                    int getProgMeth = evt.PersistentCallsList.FindOrAddGetMethodInfo(saveT, "get_Progression", new Type[] { }, new Type[] { }, progT);
+                    int progression = evt.PersistentCallsList.AddRunMethod(getProgMeth, activeSave);
+                    int dictT = evt.PersistentCallsList.FindOrAddGetTyper<Dictionary<string, Dictionary<string, System.Object>>>();
+                    int getLevelState = evt.PersistentCallsList.FindOrAddGetMethodInfo(progT, "get_LevelState", new Type[] { }, new Type[] { }, dictT);
+                    int levelState = evt.PersistentCallsList.AddRunMethod(getLevelState, progression);
+                    int savedDict = evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, Dictionary<string, System.Object>>).GetMethod("get_Item", (BindingFlags)60), levelState, new PersistentArgument(typeof(string)) { String = "G114" });
+                    // we now have the data dict
+
+                    int getter = evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, System.Object>).GetMethod("get_Item"), savedDict, new PersistentArgument(typeof(string)) { String = node.DataInputs[0].DefaultStringValue });
+
+                    evt.PersistentCallsList.AddDebugLog(getter);
+
+                    node.DataOutputs[0].CompEvt = evt;
+                    node.DataOutputs[0].CompCall = evt.PersistentCallsList[getter]; //todo
+
+                    // compile next node.
+                    var evtNext3 = node.FlowOutputs[0].Target?.Node;
+                    if (evtNext3 != null)
+                        evtNext3.Book.CompileNode(evt, evtNext3, dataRoot);
+                }
+                break;
+            case "flow_redirect": // basically a no-op, just continue
+                {
+                    var nextNode = node.FlowOutputs.FirstOrDefault()?.Target?.Node;
+                    if (nextNode != null)
+                        nextNode.Book.CompileNode(evt, nextNode, dataRoot);
+                }
+                break;
             default:
                 if (node.BookTag.Contains("_scene_") && node.BookTag.EndsWith("_var"))
                 {
                     if (node.BookTag.StartsWith("get_"))
                         GetSceneVar(null);
-                    else SetSceneVar(null); 
+                    else SetSceneVar(null);
                     return;
-                } else if (node.BookTag.Contains("_gobj_") && node.BookTag.EndsWith("_var"))
+                }
+                else if (node.BookTag.Contains("_gobj_") && node.BookTag.EndsWith("_var"))
                 {
                     if (node.BookTag.StartsWith("get_"))
                         GetSceneVar((GameObject)node.DataInputs[1].DefaultObject);
                     else SetSceneVar((GameObject)node.DataInputs[2].DefaultObject);
+                    return;
+                }
+                else if (node.BookTag.StartsWith("delegate"))
+                {
+                    // added tons of awesome utility functions, 
+                    // which should make this so much easier
+                    // pt1: creating the evt
+                    int ultType = -1;
+                    Type evtType = null;
+                    Type actionType = null;
+                    // i cannot be bothered
+                    switch (node.BookTag)
+                    {
+                        case "delegate0":
+                            evtType = typeof(UltEvent);
+                            actionType = typeof(Action);
+                            break;
+                        case "delegate1":
+                            evtType = typeof(UltEvent<object>);
+                            actionType = typeof(Action<>);
+                            break;
+                        case "delegate2":
+                            evtType = typeof(UltEvent<object, object>);
+                            actionType = typeof(Action<,>);
+                            break;
+                        case "delegate3":
+                            evtType = typeof(UltEvent<object, object, object>);
+                            actionType = typeof(Action<,,>);
+                            break;
+                        case "delegate4":
+                            evtType = typeof(UltEvent<object, object, object, object>);
+                            actionType = typeof(Action<,,,>);
+                            break;
+                    }
+
+                    evt.PersistentCallsList.AddDebugLog("Getting type:");
+                    ultType = evt.PersistentCallsList.FindOrAddGetTyper(evtType);
+                    evt.PersistentCallsList.AddDebugLog("got!");
+                    evt.PersistentCallsList.AddDebugLog(ultType);
+
+                    if (node.DataInputs.Length > 0)
+                        actionType = actionType.MakeGenericType(node.DataInputs.Select(di => Type.GetType(di.DefaultStringValue)).ToArray());
+
+                    evt.PersistentCallsList.AddDebugLog("creating floater:");
+                    // create the floating delegate target
+                    var evtInstance = MakeCall<Activator>("CreateInstance", typeof(Type));
+                    evtInstance.PersistentArguments[0].ToRetVal(ultType, typeof(Type));
+                    evt.PersistentCallsList.Add(evtInstance);
+                    int floatedIdx = evt.PersistentCallsList.Count - 1;
+                    evt.PersistentCallsList.AddDebugLog("created! (cant tostring tho)");
+
+                    // make a non-floater for compilation
+                    var evtBase = dataRoot.StoreComp<UltEventHolder>("baseDelEvent");
+                    evtBase.Event.FSetPCalls(new());
+                    evtBase.gameObject.SetActive(true);
+
+                    foreach (var o in node.DataOutputs)
+                    {
+                        if (o.Name.StartsWith("Parameter "))
+                        {
+                            o.CompEvt = evtBase.Event;
+                            o.CompAsParam = int.Parse(o.Name.Replace("Parameter ", "")) - 1;
+                            o.UseCompAsParam = true;
+                        }
+                    }
+
+                    // compile the non-floater
+                    var delNext = node.FlowOutputs[1].Target?.Node;
+                    if (delNext != null)
+                        delNext.Book.CompileNode(evtBase.Event, delNext, evtBase.transform);
+
+                    evt.PersistentCallsList.AddDebugLog("copying from template to floater");
+                    // copy PersistentCalls list from non-floater 2 floater
+                    var getBaseEvent = MakeCall<UltEventHolder>("get_Event", evtBase);
+                    evt.PersistentCallsList.Add(getBaseEvent);
+                    var getPcallMethod = typeof(UltEventBase).GetMethod("get_PersistentCallsList", (BindingFlags)60);
+                    int basePcalls = evt.PersistentCallsList.AddRunMethod(getPcallMethod, evt.PersistentCallsList.Count - 1);
+                    evt.PersistentCallsList.AddDebugLog("got pcalls");
+
+
+                    var pCallField = typeof(UltEventBase).GetField("_PersistentCalls", (BindingFlags)60);
+                    evt.PersistentCallsList.AddSetFieldValue(pCallField, floatedIdx, basePcalls);
+                    evt.PersistentCallsList.AddDebugLog("set pcalls");
+                    evt.PersistentCallsList.AddDebugLog("floater is informed:");
+                    evt.PersistentCallsList.AddDebugLog(floatedIdx);
+
+                    evt.PersistentCallsList.AddDebugLog("forming delegate...");
+                    // alr, the floater is informed!
+                    // now, Make a Delegate from Invoke(...)
+                    int invokeMethod = evt.PersistentCallsList.FindOrAddGetMethodInfo(evtType.GetMethod("Invoke", evtType.GenericTypeArguments));
+                    int actionTypeIdx = evt.PersistentCallsList.FindOrAddGetTyper(actionType);
+
+                    var createDel = typeof(Delegate).GetMethod("CreateDelegate", new Type[] { typeof(Type), typeof(object), typeof(MethodInfo) });
+                    var makeDel = new PersistentCall(createDel, null);
+                    makeDel.PersistentArguments[0].ToRetVal(actionTypeIdx, typeof(Type));
+                    makeDel.PersistentArguments[1].ToRetVal(floatedIdx, typeof(object));
+                    makeDel.PersistentArguments[2].ToRetVal(invokeMethod, typeof(MethodInfo));
+                    evt.PersistentCallsList.Add(makeDel);
+                    int delMade = evt.PersistentCallsList.Count - 1;
+                    evt.PersistentCallsList.AddDebugLog("made delegate:");
+                    evt.PersistentCallsList.AddDebugLog(delMade);
+
+                    
+                    if (node.DataOutputs[0].Targets.Count > 0) // only add delegate to dict if the user wants to
+                    {
+                        evt.PersistentCallsList.AddDebugLog("making guid");
+                        // awesome, at this point we have a dict, delegate, floater
+                        // with custom scripting within it
+                        // now we just gotta generate & output a guid + store in dict w/ guid
+                        var getGuid = MakeCall<Guid>("NewGuid");
+                        evt.PersistentCallsList.Add(getGuid);
+
+                        var getGuidStr = MakeCall<string>("Format", typeof(string), typeof(object));
+                        getGuidStr.PersistentArguments[0].String = "{0}";
+                        getGuidStr.PersistentArguments[1].ToRetVal(evt.PersistentCallsList.Count - 1, typeof(object));
+                        evt.PersistentCallsList.Add(getGuidStr);
+
+                        evt.PersistentCallsList.AddDebugLog("got guid:");
+                        evt.PersistentCallsList.AddDebugLog(evt.PersistentCallsList.IndexOf(getGuidStr));
+
+                        evt.PersistentCallsList.AddEnsureDict(node);
+                        int gotDict = evt.PersistentCallsList.AddGetDict();
+
+                        evt.PersistentCallsList.AddDebugLog("got dict:");
+                        evt.PersistentCallsList.AddDebugLog(gotDict);
+
+                        // put {GUID:Delegate} kvp into dict :)
+                        evt.PersistentCallsList.AddRunMethod(typeof(Dictionary<string, object>).GetMethod("Add"),
+                            gotDict, new object[] { evt.PersistentCallsList.IndexOf(getGuidStr), delMade });
+
+                        evt.PersistentCallsList.AddDebugLog("added kvp to dict");
+
+                        node.DataOutputs[0].CompCall = getGuidStr; // delegate
+                    }
+
+                    // now:
+                    // - also add a node to fetch from assembly_resolve_in_progress
+
+                    // compile the remaining evt, post-del
+                    node.DataOutputs[0].CompEvt = evt;
+                    node.DataOutputs[1].CompCall = evt.PersistentCallsList[delMade]; // delegate itself
+                    node.DataOutputs[1].CompEvt = evt;
+
+                    var evtNext = node.FlowOutputs[0].Target?.Node;
+                    if (evtNext != null)
+                        evtNext.Book.CompileNode(evt, evtNext, dataRoot);
+
                     return;
                 }
                 return;
@@ -720,7 +1231,8 @@ public class CommonsCookBook : CookBook
                     // found it!
                     varStoragerData.Item2.SetValue(storger, curNode.DataInputs[1].GetDefault());
                     return true;
-                } else
+                }
+                else
                     foreach (var o in curNode.FlowOutputs)
                         if (o.Target != null && SearchForDef(o.Target.Node))
                             return true;
@@ -857,5 +1369,36 @@ public class CommonsCookBook : CookBook
         bowl.Event.PersistentCallsList.Add(new PersistentCall(typeof(UltEventHolder).GetMethod("Invoke", new Type[] { }), movedEntryEvt));
     }
     [SerializeField] GameObject VarEnsurer;
+
+    public override void VerifyNodeUI(UltNoodleNodeView nodeUI)
+    {
+        if (nodeUI == null) return;
+        try
+        {
+            if (nodeUI?.Node?.Name?.StartsWith("vars.") ?? false)
+            {
+                nodeUI.DataInputs?.First()?.SetEnabled(false);
+            }
+
+            var style = nodeUI.Q("node-border").style;
+            void SetColor(Color c)
+            {
+                style.borderBottomColor = c;
+                style.borderLeftColor = c;
+                style.borderRightColor = c;
+                style.borderTopColor = c;
+            }
+
+            if (nodeUI.Node.Name.StartsWith("flow"))
+                SetColor(Color.white * .8f);
+            else if (nodeUI.Node.Name.StartsWith("math"))
+                SetColor(Color.blue * .5f);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("[NoodledEvents]: Error Verifying node UI! \n Node Booktag: " + (nodeUI?.Node?.BookTag ?? "null"));
+            Debug.LogException(ex);
+        }
+    }
 }
 #endif

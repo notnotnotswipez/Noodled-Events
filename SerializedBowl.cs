@@ -104,10 +104,12 @@ namespace NoodledEvents
         public SerializedNode EntryNode => NodeDatas[0];
         [SerializeField] public List<SerializedNode> NodeDatas = new(); // this list is "compiled" into the targ event.
         [SerializeField] public GameObject LastGenerated;
+        [SerializeField] public List<UltNoodleNoteData> NoteDatas = new();
 
+        [NonSerialized] public SerializedNode ErroredNode;
         /// <summary>
         /// Compiles this bowl into their target event.
-        /// </summary>
+        /// </summary> 
         public void Compile()
         {
             if (Event == null) Event = new UltEvent();
@@ -137,11 +139,23 @@ namespace NoodledEvents
                 }
             }
 
-            EntryNode.Compile(LastGenerated.transform);
+            try
+            {
+                EntryNode.Compile(LastGenerated.transform);
+            }
+            catch (Exception e) 
+            {
+                Debug.LogError($"[NoodledEvents]: Failed to compile node {ErroredNode.Name} in bowl {this.name}!");
+                Debug.LogException(e);
+                if (ErroredNode.CurrentUI != null)
+                    ErroredNode.CurrentUI.mainContainer.style.backgroundColor = Color.red;
+            }
+            ErroredNode = null;
 
             // postcompile hook
             foreach (var book in NodeDatas.Select(n => n.Book).Distinct())
                 book?.PostCompile(this);
+
 
             EditorSceneManager.MarkSceneDirty(this.gameObject.scene);
 

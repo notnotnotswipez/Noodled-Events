@@ -10,8 +10,10 @@ using static NoodledEvents.CookBook.NodeDef;
 
 public class LoopsCookBook : CookBook
 {
-    public override void CollectDefs(List<NodeDef> allDefs)
+    public override void CollectDefs(Action<IEnumerable<NodeDef>, float> progressCallback, Action completedCallback)
     {
+        List<NodeDef> allDefs = new();
+
         // flow.if
         allDefs.Add(new NodeDef(this, "loops.while",
             inputs: () => new[] { new Pin("Exec") },
@@ -30,12 +32,15 @@ public class LoopsCookBook : CookBook
             outputs: () => new Pin[0],
             bookTag: "break"));
 
+        progressCallback.Invoke(allDefs, 1);
+        completedCallback.Invoke();
     }
     private static MethodInfo SetActive = typeof(GameObject).GetMethod("SetActive");
     private static PropertyInfo GetSetLocPos = typeof(Transform).GetProperty("localPosition");
     private static MethodInfo Translate = typeof(Transform).GetMethod("Translate", new Type[] { typeof(float), typeof(float), typeof(float) });
     public override void CompileNode(UltEventBase evt, SerializedNode node, Transform dataRoot)
     {
+        base.CompileNode(evt, node, dataRoot);
         if (evt.PersistentCallsList == null) evt.FSetPCalls(new());
 
         // Loops take this structure:
@@ -91,7 +96,7 @@ public class LoopsCookBook : CookBook
                     //  - translate up by input 1
                     var startCall = new PersistentCall(Translate, iTransf);
                     if (node.DataInputs[0].Source != null)
-                        new PendingConnection(node.DataInputs[0].Source, evt, startCall, 1);
+                        new PendingConnection(node.DataInputs[0].Source, evt, startCall, 1).Connect(dataRoot);
                     else startCall.PersistentArguments[1].Float = node.DataInputs[0].DefaultFloatValue;
                     evt.PersistentCallsList.Add(startCall);
                     //  - start loop
@@ -120,7 +125,7 @@ public class LoopsCookBook : CookBook
                         greater.FSetArguments(new PersistentArgument(typeof(float)), new PersistentArgument(typeof(float)));
                         greater.PersistentArguments[0].ToRetVal(loopEvt.Event.PersistentCallsList.Count - 1, typeof(float));
                         if (node.DataInputs[1].Source != null)
-                            new PendingConnection(node.DataInputs[1].Source, loopEvt.Event, greater, 1);
+                            new PendingConnection(node.DataInputs[1].Source, loopEvt.Event, greater, 1).Connect(dataRoot);
                         else greater.PersistentArguments[1].Float = node.DataInputs[1].DefaultFloatValue;
                         loopEvt.Event.PersistentCallsList.Add(greater);
 

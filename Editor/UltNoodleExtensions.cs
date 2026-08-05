@@ -66,6 +66,15 @@ namespace NoodledEvents
             }
         }
 
+        public static PersistentCall FirstWithin(this List<PersistentCall> pCalls, UltEventBase ult)
+        {
+            foreach (PersistentCall call in pCalls)
+            {
+                if (ult.PersistentCallsList.Contains(call)) return call;
+            }
+            throw new NotImplementedException();
+        }
+
         public static Type[] GetAllTypes()
         {
             /*foreach (var assembl in AppDomain.CurrentDomain.GetAssemblies())
@@ -96,6 +105,12 @@ namespace NoodledEvents
             
             //EditorUtility.DisplayProgressBar("Finding Types...", "", 0);
             var assembs = AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.FullName.StartsWith("UnityEditor"));
+            //string tlist = "";
+            //foreach (var a in assembs)
+            {
+                //tlist += "\n" + a.FullName;
+            }
+            //Debug.Log(tlist); 
             float n = (float)assembs.Count();
             int i = 0;
             var types = assembs
@@ -119,6 +134,8 @@ namespace NoodledEvents
                 });
             return types.ToArray();
         }
+
+        
     }
 }
 #endif

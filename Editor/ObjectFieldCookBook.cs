@@ -4,8 +4,10 @@ using NoodledEvents;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using UltEvents;
-using UnityEditor.Experimental.GraphView;
+using UnityEditor;
 using UnityEngine;
 using static NoodledEvents.CookBook.NodeDef;
 
@@ -13,13 +15,30 @@ using static NoodledEvents.CookBook.NodeDef;
 public class ObjectFieldCookBook : CookBook
 {
     private Dictionary<FieldInfo, (NodeDef, NodeDef)> MyDefs = new();
-    public override void CollectDefs(List<NodeDef> allDefs) // why aren't these threaded
+    public override void CollectDefs(Action<IEnumerable<NodeDef>, float> progressCallback, Action completedCallback)
     {
         MyDefs.Clear();
-        foreach (var t in UltNoodleEditor.SearchableTypes)
+        int i = 0;
+
+        CancellationTokenSource cts = new();
+
+        // Use ParallelOptions instance to store the CancellationToken
+        ParallelOptions options = new()
+        {
+            CancellationToken = cts.Token,
+            MaxDegreeOfParallelism = Environment.ProcessorCount
+        };
+
+        EditorApplication.quitting += () =>
+        {
+            cts.Cancel();
+        };
+
+        var p = Task.Run(() => Parallel.ForEach<Type>(UltNoodleEditor.SearchableTypes, options, (t) =>
         {
             try
             {
+                List<NodeDef> newDefs = new();
                 foreach (var field in t.GetFields(UltEventUtils.AnyAccessBindings))
                 {
                     var getter =
@@ -29,23 +48,29 @@ public class ObjectFieldCookBook : CookBook
                             bookTag: JsonUtility.ToJson(new SerializedField() { Field = field }),
                             tooltipOverride: $"{t.Namespace}.{t.GetFriendlyName()}.getf_{field.Name} (Reflection)")
                         );
-                    allDefs.Add(getter);
+                    newDefs.Add(getter);
                     var setter =
                     (new NodeDef(this, $"{t.GetFriendlyName()}.setf_{field.Name}",
                         inputs: () => field.IsStatic ? new Pin[] { new Pin("Reflection Set"), new NodeDef.Pin(field.Name, field.FieldType) } : new Pin[] { new Pin("Reflection Set"), new Pin(t.GetFriendlyName(), t), new NodeDef.Pin(field.Name, field.FieldType) },
                         outputs: () => new[] { new NodeDef.Pin("sot") },
                         bookTag: JsonUtility.ToJson(new SerializedField() { Field = field }),
-                        tooltipOverride: $"{t.Namespace}.{t.GetFriendlyName()}.setf_{field.Name} (Reflection)")
+                        tooltipOverride: $"{t.Namespace}.{t.GetFriendlyName()}.setf_{field.Name} (Reflection), {t.Assembly.FullName.Split(',')[0]}")
                     );
-                    allDefs.Add(setter);
-                    MyDefs.Add(field, (getter, setter));
+                    newDefs.Add(setter);
+                    UltNoodleEditor.MainThread.Enqueue(() => MyDefs.Add(field, (getter, setter)));
                 }
-            } catch(TypeLoadException) { };
-        }
+                progressCallback.Invoke(newDefs, (++i / (float)UltNoodleEditor.SearchableTypes.Length));
+            }
+            catch (TypeLoadException) { };
+            
+        }));
+        
+        p.ContinueWith(t => completedCallback.Invoke());
     }
     
     public override void CompileNode(UltEventBase evt, SerializedNode node, Transform dataRoot)
     {
+        base.CompileNode(evt, node, dataRoot);
         SerializedField field = JsonUtility.FromJson<SerializedField>(node.BookTag);
         evt.EnsurePCallList();
 
@@ -170,11 +195,11 @@ public class ObjectFieldCookBook : CookBook
             else editorSetCall.PersistentArguments[2].FSetType(PersistentArgumentType.Object);
             evt.PersistentCallsList.Add(editorSetCall);
 
-            var ingameSetCall = new PersistentCall();
+            /*var ingameSetCall = new PersistentCall();
             ingameSetCall.CopyFrom(editorSetCall);
             ingameSetCall.FSetMethodName("System.Linq.Expressions.Interpreter.CallInstruction, System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e.ArrayItemSetter1");
             ingameSetCall.FSetMethod(null);
-            evt.PersistentCallsList.Add(ingameSetCall);
+            evt.PersistentCallsList.Add(ingameSetCall);*/
 
             PersistentCall getValue = new PersistentCall(Type.GetType("System.SecurityUtils, System, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089", true, true).GetMethod("MethodInfoInvoke", UltEventUtils.AnyAccessBindings, null,
             new Type[] { typeof(MethodInfo), typeof(object), typeof(object[]) }, null), null);
@@ -224,11 +249,11 @@ public class ObjectFieldCookBook : CookBook
             else editorSetCall.PersistentArguments[2].FSetType(PersistentArgumentType.Object);
             evt.PersistentCallsList.Add(editorSetCall);
 
-            var ingameSetCall = new PersistentCall();
+            /*var ingameSetCall = new PersistentCall();
             ingameSetCall.CopyFrom(editorSetCall);
             ingameSetCall.FSetMethodName("System.Linq.Expressions.Interpreter.CallInstruction, System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e.ArrayItemSetter1");
             ingameSetCall.FSetMethod(null);
-            evt.PersistentCallsList.Add(ingameSetCall);
+            evt.PersistentCallsList.Add(ingameSetCall);*/
 
             var editorSetCall2 = new PersistentCall(typeof(UltNoodleRuntimeExtensions).GetMethod("ArrayItemSetter1", UltEventUtils.AnyAccessBindings), null);
             editorSetCall2.PersistentArguments[0].ToRetVal(evt.PersistentCallsList.IndexOf(twoTargArr), typeof(Array));
@@ -239,11 +264,11 @@ public class ObjectFieldCookBook : CookBook
             else editorSetCall2.PersistentArguments[2].FSetType(node.DataInputs[srcIdx].GetPCallType()).Value = node.DataInputs[srcIdx].GetDefault();
             evt.PersistentCallsList.Add(editorSetCall2);
 
-            var ingameSetCall2 = new PersistentCall();
+            /*var ingameSetCall2 = new PersistentCall();
             ingameSetCall2.CopyFrom(editorSetCall2);
             ingameSetCall2.FSetMethodName("System.Linq.Expressions.Interpreter.CallInstruction, System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e.ArrayItemSetter1");
             ingameSetCall2.FSetMethod(null);
-            evt.PersistentCallsList.Add(ingameSetCall2);
+            evt.PersistentCallsList.Add(ingameSetCall2);*/
 
             PersistentCall setValue = new PersistentCall(Type.GetType("System.SecurityUtils, System, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089", true, true).GetMethod("MethodInfoInvoke", UltEventUtils.AnyAccessBindings, null,
             new Type[] { typeof(MethodInfo), typeof(object), typeof(object[]) }, null), null);

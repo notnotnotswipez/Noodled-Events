@@ -38,13 +38,56 @@ namespace NoodledEvents
         protected static MethodInfo SetActive = typeof(GameObject).GetMethod("SetActive");
         protected static PropertyInfo GetSetLocPos = typeof(Transform).GetProperty("localPosition");
         protected static MethodInfo Translate = typeof(Transform).GetMethod("Translate", new Type[] { typeof(float), typeof(float), typeof(float) });
-        public virtual void CollectDefs(List<NodeDef> allDefs) 
+        public virtual void CollectDefs(Action<IEnumerable<NodeDef>, float> progressCallback, Action completedCallback) 
         {
-            
+            completedCallback.Invoke();
         }
+
+        private static SerializedNode lastCompiledNode;
         public virtual void CompileNode(UltEventBase evt, SerializedNode node, Transform dataRoot)
         {
             // when a bowl is compiled, it puts forward an evt that is filled by compiled nodes.
+            // this func handles it
+            // method overrides of this func should also call base.CompileNode(evt, node, dataRoot);
+            
+            // this is so that errors can be displayed on the node, if it does error.
+            node.Bowl.ErroredNode = node;
+            if (node.CurrentUI != null) node.CurrentUI.mainContainer.style.backgroundColor = new Color(0, 0, 0, 0);
+
+            // this is so that nodes with SerializedNode.ForceDebugLogs = true can have debug logs
+            UltNoodleRuntimeExtensions.CurrentNode = node;
+
+            evt.PersistentCallsList.AddDebugLog($"[{node.Name}]: --- NODE START ---");
+
+            // if any of our inputs are connected to a redirect, we need to find the real source and copy its compEvt/compCall
+            foreach (var input in node.DataInputs.Where(di => di.Source?.Node?.NoadType == SerializedNode.NodeType.Redirect))
+            {
+                var redirectChain = new List<SerializedNode>();
+                var current = input.Source.Node;
+
+                // collect the redirect chain
+                while (current != null && current.NoadType == SerializedNode.NodeType.Redirect)
+                {
+                    redirectChain.Add(current);
+                    current = current.DataInputs[0].Source?.Node;
+                }
+
+                // current is now the source node (or null if not connected)
+
+                if (current != null && current.DataOutputs.Length > 0)
+                {
+                    var compEvt = current.DataOutputs[0].CompEvt;
+                    var call = current.DataOutputs[0].CompCall;
+
+                    // set all redirects in the chain to use this compEvt/compCall
+                    for (int i = redirectChain.Count - 1; i >= 0; i--)
+                    {
+                        var r = redirectChain[i];
+                        r.DataOutputs[0].CompEvt = compEvt;
+                        r.DataOutputs[0].CompCall = call;
+                    }
+                }
+            }
         }
         public virtual void PostCompile(SerializedBowl bowl)
         {
@@ -62,13 +105,32 @@ namespace NoodledEvents
         public virtual void SwapConnections(SerializedNode oldNode, SerializedNode newNode)
         {
             if (oldNode.FlowInputs.Length > 0 && newNode.FlowInputs.Length > 0)
-                foreach (var fsrc in oldNode.FlowInputs[0].Sources)
+                foreach (var fsrc in oldNode.FlowInputs[0].Sources.ToList())
                     fsrc.Connect(newNode.FlowInputs[0]);
 
             if (oldNode.FlowOutputs.Length > 0 && newNode.FlowOutputs.Length > 0)
                 if (oldNode.FlowOutputs[0].Target != null)
                     newNode.FlowOutputs[0].Connect(oldNode.FlowOutputs[0].Target);
         }
+
+        // ran when a node's UI connections get changed, for when we need dynamic titles or type hints.
+        public virtual void VerifyNodeUI(UltNoodleNodeView nodeUI) { }
+
+        public static PersistentCall MakeCall(string method)
+        {
+            var c = new PersistentCall();
+            c.FSetMethodName(method);
+            return c;
+        }
+        public static PersistentCall MakeCall<T>(string method, params Type[] ts)
+            => new PersistentCall(typeof(T).GetMethod(method, UltEventUtils.AnyAccessBindings, null, ts, null), null);
+        public static PersistentCall MakeCall(Type t, string method, params Type[] ts)
+            => new PersistentCall(t.GetMethod(method, UltEventUtils.AnyAccessBindings, null, ts, null), null);
+        public static PersistentCall MakeCall<T>(string method, UnityEngine.Object obj = null, params Type[] ts)
+            => new PersistentCall(typeof(T).GetMethod(method, UltEventUtils.AnyAccessBindings, null, ts, null), obj);
+        public static PersistentCall MakeCall<T>(string method, UnityEngine.Object obj = null)
+            => new PersistentCall(typeof(T).GetMethod(method, UltEventUtils.AnyAccessBindings), obj);
+
         public class PendingConnection // utility class to link pcalls, with support for cross-event data transfer
         { 
             /// <summary>
@@ -79,12 +141,35 @@ namespace NoodledEvents
             /// <param name="targCall"></param>
             /// <param name="argIdx"></param>
             public PendingConnection(NoodleDataOutput o, UltEventBase targEvt, PersistentCall targCall, int argIdx) 
-            { 
-                SourceEvent = o.CompEvt; SourceCall = o.CompCall;
+            {
                 TargEvent = targEvt; TargCall = targCall;
-                TargArgType = targCall.Method.GetParameters()[argIdx].ParameterType; TargInput = argIdx;
+                TargInwardType = targCall.Method.GetParameters()[argIdx].ParameterType; TargInput = argIdx;
+                if (o.Node.NoadType == SerializedNode.NodeType.Redirect) // Handle redirect nodes /// From CookBook.CompileNode
+                {
+                    SerializedNode secondtolast = null;
+                    var current = o.Node;
+
+                    // ride the redirect chain
+                    while (current != null && current.NoadType == SerializedNode.NodeType.Redirect)
+                    {
+                        secondtolast = current;
+                        current = current.DataInputs[0].Source?.Node;
+                    }
+                    // current is now the source node (or null if not connected)
+                    // find out what connection was used
+                    o = secondtolast.DataInputs[0].Source;
+
+                    if (o == null) // Redirect with missing wire on left side
+                    {
+                        return;
+                    }
+                }
+                SourceEvents = o.AllCompEvts; SourceCalls = o.AllCompCalls;
+                SourceOutwardType = o.Type.Type;
                 if (o.Node.NoadType == SerializedNode.NodeType.BowlInOut)
                     ArgIsSource = Array.IndexOf(o.Node.DataOutputs, o);
+                else if (o.UseCompAsParam)
+                    ArgIsSource = o.CompAsParam;
                 else ArgIsSource = -1;
             }
 
@@ -97,38 +182,54 @@ namespace NoodledEvents
                 { typeof(bool), (typeof(UnityEngine.UI.Mask), typeof(UnityEngine.UI.Mask).GetProperty("enabled")) },
                 { typeof(Vector3), (typeof(PositionConstraint), typeof(PositionConstraint).GetProperty(nameof(PositionConstraint.translationOffset))) },
                 { typeof(string), (typeof(TextMeshPro), typeof(TMP_Text).GetProperty("text", UltEventUtils.AnyAccessBindings)) },
-                { typeof(int), (typeof(LineRenderer), typeof(LineRenderer).GetProperty("numCapVertices", UltEventUtils.AnyAccessBindings)) }
+                { typeof(int), (typeof(LineRenderer), typeof(LineRenderer).GetProperty("numCapVertices", UltEventUtils.AnyAccessBindings)) },
+                { typeof(Vector2), (typeof(RectTransform), typeof(RectTransform).GetProperty("sizeDelta", UltEventUtils.AnyAccessBindings)) },
+                { typeof(object), (typeof(ObjectStore), typeof(ObjectStore).GetProperty("Obj", UltEventUtils.AnyAccessBindings)) }
             };
-        /* Todo types for CompStoragers
-        {typeof(uint), "uint"},
-        {typeof(long), "long"},
-        { typeof(ulong), "ulong"},
-        { typeof(short), "short"},
-        { typeof(ushort), "ushort"},
-        { typeof(byte), "byte"},
-        { typeof(sbyte), "sbyte"},
-        { typeof(double), "double"},
-        { typeof(decimal), "decimal"},
-        { typeof(char), "char"},
-        // these remains are pretty uncommon, i'll implement them later
-        */
+            /* Todo types for CompStoragers
+            {typeof(Vector3), "Vector3"},
+            {typeof(uint), "uint"},
+            {typeof(long), "long"},
+            { typeof(ulong), "ulong"},
+            { typeof(short), "short"},
+            { typeof(ushort), "ushort"},
+            { typeof(byte), "byte"},
+            { typeof(sbyte), "sbyte"},
+            { typeof(double), "double"},
+            { typeof(decimal), "decimal"},
+            { typeof(char), "char"},
+            // these remains are pretty uncommon, i'll implement them later
+            */
 
             public int ArgIsSource; // if this is from an arg (-1 means no >= 0 gives arg idx)
-            public UltEventBase SourceEvent;
-            public PersistentCall SourceCall;
+            public List<UltEventBase> SourceEvents;
+            public List<PersistentCall> SourceCalls;
 
             public UltEventBase TargEvent;
             public PersistentCall TargCall;
-            public Type TargArgType;
+            public Type TargInwardType;
+            public Type SourceOutwardType;
             public int TargInput; // the idx of the arg on the TargCall to set as Arg
             public void Connect(Transform dataRoot) // fyi this is called while the targcall is being constructed
             {
-                if (SourceEvent == TargEvent) // same evt connection
+                if (SourceEvents == null) 
+                {
+                    // People dont typically have warnings on in the log
+                    Debug.LogWarning("A data redirect node is connected to a node on the right but not the left!\n" +
+                        $"Method of node is {TargCall.MethodName}");
+                    // So il make the recieved input a proper null instead of leaving None or ret -1
+                    // I think that new nodes with object parameters should be initialized with this instead of none, as it's more intuitive
+                    TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToObjVal(null, TargInwardType);
+                    return;
+                    // TODO: make redirect node show as red
+                }
+
+                if (SourceEvents.Contains(TargEvent)) // same evt connection
                 {
                     if (ArgIsSource > -1)
-                        TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToParamVal(ArgIsSource, TargArgType);
+                        TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToParamVal(ArgIsSource, TargInwardType);
                     else
-                        TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToRetVal(SourceEvent.PersistentCallsList.IndexOf(SourceCall), TargArgType);
+                        TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToRetVal(TargEvent.PersistentCallsList.IndexOf(SourceCalls.FirstWithin(TargEvent)), TargInwardType);
                 }
                 else
                 {
@@ -138,18 +239,11 @@ namespace NoodledEvents
                     // for UnityEngine.Object, this is easy
                     // all the other types (int, float, color, bool) are todo.
 
-                        
-                    Type transferredType = TargArgType;
-                    if (ArgIsSource == -1)
-                    {
-                        if (SourceCall.Method.GetReturnType().IsSubclassOf(TargArgType))
-                            transferredType = SourceCall.Method.GetReturnType();
-                    } else
-                    {
-                        Type evtT = SourceEvent.GetType().GetEvtGenerics()[ArgIsSource]; 
-                        if (evtT.IsSubclassOf(TargArgType))
-                            transferredType = evtT;
-                    }
+                    var SourceEvent = SourceEvents[0];
+
+                    Type transferredType = TargInwardType;
+                    if (transferredType.IsAssignableFrom(SourceOutwardType))
+                        transferredType = SourceOutwardType;
 
                     foreach (var kvp in CompStoragers)
                     {
@@ -165,7 +259,7 @@ namespace NoodledEvents
                         PersistentCall varSet = null;
                         if (ArgIsSource == -1)
                         {
-                            int sourceIdx = SourceEvent.PersistentCallsList.IndexOf(SourceCall); // source PCall idx
+                            int sourceIdx = SourceEvent.PersistentCallsList.IndexOf(SourceCalls[0]); // source PCall idx
                             varSet = new PersistentCall(kvp.Value.Item2.SetMethod, compVar); // compVar setter PCall
                             varSet.FSetArguments(new PersistentArgument().ToRetVal(sourceIdx, transferredType)); // arg for compVar setter PCall
                             SourceEvent.PersistentCallsList.SafeInsert(sourceIdx + 1, varSet); // add compVar setter PCall directly after source PCall
@@ -184,13 +278,13 @@ namespace NoodledEvents
                         TargEvent.PersistentCallsList.Add(getPCall);
 
                         // make targcall ref the gotten value (remember, targcall is under construction rn so its gonna be added last)
-                        TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToRetVal(TargEvent.PersistentCallsList.Count - 1, TargArgType);
+                        TargCall.PersistentArguments[TargInput] = new PersistentArgument().ToRetVal(TargEvent.PersistentCallsList.Count - 1, TargInwardType);
 
                         return;
                     }
 
                     // fail
-                    Debug.Log("failed data transfer for " + TargArgType);
+                    Debug.Log("failed data transfer for " + TargInwardType);
                     
                 }
             }
@@ -208,13 +302,18 @@ namespace NoodledEvents
                 {
                     var o = new UnityEngine.UIElements.Button(() =>
                     {
-                        if (UltNoodleEditor.NewNodeBowl == null) return;
-                        var nod = UltNoodleEditor.NewNodeBowl.AddNode(def.Name, book).MatchDef(def);
+                        if (UltNoodleEditor.Editor == null) return;
+                        UltNoodleBowl bowl = UltNoodleEditor.Editor.CurrentBowl;
+                        if (bowl == null) return;
+                        var nod = bowl.AddNode(def.Name, book).MatchDef(def);
 
                         nod.BookTag = def.BookTag != string.Empty ? def.BookTag : def.Name;
 
-                        nod.Position = UltNoodleEditor.NewNodePos;
-                        UltNoodleEditor.NewNodeBowl.Validate();
+                        nod.Position = UltNoodleEditor.Editor.TreeView.NewNodeSpawnPos;
+                        bowl.Validate();
+                        UltNoodleEditor.Editor.TreeView.RenderNewNodes();
+
+                        UltNoodleSearchWindow.ForceClose();
                     });
                     o.text = searchTextOverride == string.Empty ? def.Name : searchTextOverride;
                     o.tooltip = tooltipOverride == string.Empty ? o.text : tooltipOverride;
@@ -228,7 +327,17 @@ namespace NoodledEvents
             public string BookTag;
             public Func<SerializedNode> CreateNode;
             private Func<NodeDef, Button> createSearchItem;
-            public Button SearchItem => _searchItem ??= createSearchItem.Invoke(this);
+            public Button SearchItem
+            {
+                get
+                {
+                    if (_searchItem == null) 
+                    {
+                        _searchItem = createSearchItem.Invoke(this);
+                        _searchItem.style.unityTextAlign = TextAnchor.MiddleLeft;
+                    } return _searchItem;
+                }
+            }
             private Button _searchItem;
 
             public class Pin

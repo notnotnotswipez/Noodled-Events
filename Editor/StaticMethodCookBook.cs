@@ -4,83 +4,146 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using UltEvents;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.UIElements;
 using static NoodledEvents.CookBook.NodeDef;
 
 
 public class StaticMethodCookBook : CookBook
 {
     private Dictionary<MethodInfo, NodeDef> MyDefs = new();
-    public override void CollectDefs(List<NodeDef> allDefs)
+    public override void CollectDefs(Action<IEnumerable<NodeDef>, float> progressCallback, Action completedCallback)
     {
         MyDefs.Clear();
-        foreach (var t in UltNoodleEditor.SearchableTypes)
+        int i = 0;
+
+        CancellationTokenSource cts = new();
+
+        // Use ParallelOptions instance to store the CancellationToken
+        ParallelOptions options = new()
         {
-            MethodInfo[] methods = null;
+            CancellationToken = cts.Token,
+            MaxDegreeOfParallelism = Environment.ProcessorCount
+        };
+
+        EditorApplication.quitting += () =>
+        {
+            cts.Cancel();
+        };
+
+        var p = Task.Run(() => Parallel.ForEach<Type>(UltNoodleEditor.SearchableTypes, options, (t) =>
+        {
             try
             {
-                methods = t.GetMethods(UltEventUtils.AnyAccessBindings);
-            } catch(TypeLoadException) { continue; }
-            
-            foreach (var meth in methods)
-            {
-                if (meth.DeclaringType != t) continue;
-                if (!meth.IsStatic) continue;
-                
-                string searchText = $"static {t.GetFriendlyName()}.{meth.Name}";
-                string descriptiveText = $"static {meth.ReturnType.GetFriendlyName()} {t.Namespace}.{t.GetFriendlyName()}.{meth.Name}";
-
-                var parames = meth.GetParameters();
-                if (parames.Length == 0) descriptiveText += "()";
-                else
+                List<NodeDef> newDefs = new();
+                foreach (var meth in t.GetMethods(UltEventUtils.AnyAccessBindings))
                 {
-                    descriptiveText += "(";
-                    searchText += "(";
-                    foreach (var param in parames)
-                    {
-                        searchText += $"{param.ParameterType.GetFriendlyName()}, ";
-                        descriptiveText += $"{param.ParameterType.GetFriendlyName()} {param.Name}, ";
-                    }
-                    descriptiveText = descriptiveText.Substring(0, descriptiveText.Length - 2);
-                    searchText = searchText.Substring(0, searchText.Length - 2);
-                    descriptiveText += ")";
-                    searchText += ")";
-                }
+                    if (meth.DeclaringType != t) continue;
+                    if (!meth.IsStatic) continue;
 
-                
-                var newDef = new NodeDef(this, t.GetFriendlyName() + "." + meth.Name, 
-                    inputs:() => 
+                    string searchText = $"static {t.GetFriendlyName()}.{meth.Name}";
+                    string descriptiveText = $"static {meth.ReturnType.GetFriendlyName()} {t.Namespace}.{t.GetFriendlyName()}.{meth.Name}";
+
+                    var parames = meth.GetParameters();
+                    if (parames.Length == 0) descriptiveText += "()";
+                    else
                     {
-                        var @params = meth.GetParameters();
-                        if (@params == null || @params.Length == 0) return new Pin[] { new NodeDef.Pin("Exec") };
-                        return @params.Select(p => new Pin(p.Name, p.ParameterType)).Prepend(new NodeDef.Pin("Exec")).ToArray(); 
-                    },
-                    outputs:() => 
+                        descriptiveText += "(";
+                        searchText += "(";
+                        foreach (var param in parames)
+                        {
+                            searchText += $"{param.ParameterType.GetFriendlyName()}, ";
+                            descriptiveText += $"{param.ParameterType.GetFriendlyName()} {param.Name}, ";
+                        }
+                        descriptiveText = descriptiveText.Substring(0, descriptiveText.Length - 2);
+                        searchText = searchText.Substring(0, searchText.Length - 2);
+                        descriptiveText += ")";
+                        searchText += ")";
+                    }
+
+                    descriptiveText += $", {t.Assembly.FullName.Split(',')[0]}";
+
+
+                    bool hasRefParam = false;
+                    var y = meth.GetParameters();
+                    for (int i = 0; i < y.Length; i++)
                     {
-                        if (meth.GetRetType() != typeof(void))
-                            return new[] { new NodeDef.Pin("Done"), new NodeDef.Pin(meth.ReturnType.GetFriendlyName(), meth.ReturnType) };
-                        else return new[] { new NodeDef.Pin("Done") };
-                    },
-                    bookTag: JsonUtility.ToJson(new SerializedMethod() { Method = meth }),
-                    searchTextOverride: searchText,
-                    tooltipOverride: descriptiveText);
-                allDefs.Add(newDef);
-                MyDefs.Add(meth, newDef);
+                        if (y[i].ParameterType.IsByRef)
+                        {
+                            hasRefParam = true;
+                            break;
+                        }
+                    }
+                    string execPinMsg = hasRefParam ? "Reflection Exec" : "Exec";
+                    var newDef = new NodeDef(this, t.GetFriendlyName() + "." + meth.Name,
+                        inputs: () =>
+                        {
+                            var @params = meth.GetParameters();
+                            if (@params == null || @params.Length == 0) return new Pin[] { new NodeDef.Pin(execPinMsg) };
+                            return @params.Select(p => new Pin(p.GetParamName(brackets: true), p.ParameterType)).Prepend(new NodeDef.Pin(execPinMsg)).ToArray();
+                        },
+                        outputs: () =>
+                        {
+                            var pins = new List<Pin>() { new NodeDef.Pin("Done") };
+
+                            if (meth.GetRetType() != typeof(void))
+                                pins.Add( new NodeDef.Pin(meth.ReturnType.GetFriendlyName(), meth.ReturnType) );
+
+                            var refparams = meth.GetParameters().Where(p => p.ParameterType.IsByRef);
+                            foreach(var refparam in refparams)
+                                pins.Add(new Pin(refparam.GetParamName(), refparam.ParameterType));
+                            
+
+                            return pins.ToArray();
+                        },
+                        bookTag: JsonUtility.ToJson(new SerializedMethod() { Method = meth }),
+                        searchTextOverride: searchText,
+                        tooltipOverride: descriptiveText);
+                    newDefs.Add(newDef);
+                    UltNoodleEditor.MainThread.Enqueue(() => MyDefs.Add(meth, newDef));
+                }
+                progressCallback.Invoke(newDefs, (++i / (float)UltNoodleEditor.SearchableTypes.Length));
             }
-        }
+            catch (TypeLoadException) { }
+        }));
+        p.ContinueWith(t => completedCallback.Invoke());
     }
     
     public override void CompileNode(UltEventBase evt, SerializedNode node, Transform dataRoot)
     {
+        base.CompileNode(evt, node, dataRoot);
         // figure node method
         SerializedMethod meth = JsonUtility.FromJson<SerializedMethod>(node.BookTag);
 
         // sanity check (AddComponent() leaves this field empty)
         if (evt.PersistentCallsList == null) evt.FSetPCalls(new());
 
+        // check for ref params
+        bool hasRefParam = false;
+        var y = meth.Method.GetParameters();
+        for (int i = 0; i < y.Length; i++)
+        {
+            if (y[i].ParameterType.IsByRef)
+            {
+                hasRefParam = true;
+                break;
+            }
+        }
+        if (hasRefParam) // just pass compilation off to the Object Method Cook Book (I repurposed it :3 techdebt my beloved)
+        {
+            // no singleton pattern </3
+            UltNoodleEditor.AllBooks.FirstOrDefault(b => b.GetType() == typeof(ObjectMethodCookBook))
+                .CompileNode(evt, node, dataRoot);
+            return;
+        }
+
+
         // foreach input
-        
+
         PersistentCall myCall = new PersistentCall(); // make my PCall
         myCall.SetMethod(meth.Method, null);
         if (node.DataInputs.Length > 0)
@@ -231,6 +294,64 @@ public class StaticMethodCookBook : CookBook
             }
         }
         return o;
+    }
+
+    public override void VerifyNodeUI(UltNoodleNodeView nodeUI)
+    {
+        base.VerifyNodeUI(nodeUI);
+
+        var style = nodeUI.Q("node-border").style;
+        void SetColor(Color c)
+        {
+            style.borderBottomColor = c;
+            style.borderLeftColor = c;
+            style.borderRightColor = c;
+            style.borderTopColor = c;
+        }
+        try
+        {
+            SerializedMethod meth = JsonUtility.FromJson<SerializedMethod>(nodeUI.Node.BookTag);
+            if (meth.Method.DeclaringType.Namespace.StartsWith("System"))
+            {
+                if (meth.Method.DeclaringType.Namespace.Contains("Numerics"))
+                    SetColor(Color.red * .5f);
+                else
+                    SetColor(Color.blue * .5f);
+            } else if (meth.Method.DeclaringType == typeof(Vector3))
+                    SetColor(Color.blue * .5f);
+
+
+            var titleRoot = nodeUI.Q("title");
+
+            if (typeof(UnityEngine.Object).IsAssignableFrom(meth.Method.DeclaringType) && titleRoot[0].name != "Icon")
+            {
+                var icon = EditorGUIUtility.ObjectContent(null, meth.Method.DeclaringType)?.image;
+                if (icon != null)
+                {
+                    var img = new VisualElement();
+                    img.style.backgroundImage = (StyleBackground)icon;
+                    var t = nodeUI.Q("title");
+                    t.Add(img);
+                    img.SendToBack();
+                    img.name = "Icon";
+                    img.style.minWidth = 20;
+                    img.style.marginLeft = 5;
+                    img.style.marginTop = 8;
+                    img.style.maxHeight = 20;
+                    t[1].style.marginLeft = 2;
+                    t.style.justifyContent = Justify.FlexStart;
+                    var spacer = new VisualElement();
+                    spacer.style.flexGrow = 1;
+                    spacer.name = "spacer";
+                    t.Insert(2, spacer);
+                }
+            }
+        }
+        catch (Exception ex) 
+        {
+            Debug.LogError("[NoodledEvents]: Error Verifying node UI! \n Node Booktag: " + (nodeUI?.Node?.BookTag ?? "null"));
+            Debug.LogException(ex);
+        }
     }
 }
 #endif
