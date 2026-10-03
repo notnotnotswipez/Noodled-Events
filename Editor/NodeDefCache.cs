@@ -64,6 +64,41 @@ namespace NoodledEvents
 
         public static CookBook.NodeDef FromCached(CachedNodeDef cached, CookBook cookbook)
         {
+            string searchText = cached.SearchTextOverride ?? "";
+            
+            if (cached.Inputs != null) {
+                searchText += cached.Name;
+
+                if (cached.Inputs.Length > 1)
+                {
+                    searchText += " (";
+                    for (int i = 1; i < cached.Inputs.Length; i++)
+                    {
+                        CachedPin cachedPin = cached.Inputs[i];
+                        if (cachedPin.GetPinType() != null)
+                        {
+                            Type type = cachedPin.GetPinType();
+                            searchText += type.Namespace+"."+type.Name;
+                        }
+                        else
+                        {
+                            searchText += cachedPin.Name;
+                        }
+
+                        if (i != cached.Inputs.Length - 1)
+                        {
+                            searchText += ", ";
+                        }
+                    }
+
+                    searchText += ")";
+                }
+                else {
+                    searchText = "";
+                }
+            }
+            
+
             return new CookBook.NodeDef(
                 book: cookbook,
                 name: cached.Name,
@@ -78,7 +113,7 @@ namespace NoodledEvents
                     p.Const
                 )).ToArray() ?? Array.Empty<CookBook.NodeDef.Pin>(),
                 bookTag: cached.BookTag ?? "",
-                searchTextOverride: cached.SearchTextOverride ?? "",
+                searchTextOverride: searchText,
                 tooltipOverride: cached.TooltipOverride ?? ""
             );
         }

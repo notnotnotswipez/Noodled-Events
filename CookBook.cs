@@ -313,7 +313,6 @@ namespace NoodledEvents
                         bowl.Validate();
                         UltNoodleEditor.Editor.TreeView.RenderNewNodes();
 
-                        UltNoodleSearchWindow.ForceClose();
                     });
                     o.text = searchTextOverride == string.Empty ? def.Name : searchTextOverride;
                     o.tooltip = tooltipOverride == string.Empty ? o.text : tooltipOverride;
